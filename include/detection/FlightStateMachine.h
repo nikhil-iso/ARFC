@@ -18,8 +18,9 @@ class FlightStateMachine {
     FlightState state() const;
 
    private:
+    void transitionTo(FlightState new_state);
+
     FlightState state_;
 };
 
 }  // namespace arfc
-

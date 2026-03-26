@@ -1,7 +1,7 @@
 #include "datasource/SerialPacketParser.h"
 
+#include <math.h>
 #include <stdlib.h>
-#include <string.h>
 
 namespace arfc {
 
@@ -9,6 +9,10 @@ namespace {
 
 bool parseUnsignedLong(char* token, uint32_t& value) {
     if (token == nullptr || *token == '\0') {
+        return false;
+    }
+
+    if (*token == '-') {
         return false;
     }
 
@@ -29,74 +33,99 @@ bool parseFloat(char* token, float& value) {
 
     char* end_ptr = nullptr;
     value = strtof(token, &end_ptr);
-    return end_ptr != token && *end_ptr == '\0';
+    return end_ptr != token && *end_ptr == '\0' && isfinite(value);
 }
 
 }  // namespace
 
-bool SerialPacketParser::parseLine(const char* line, FlightSample& sample) const {
+SerialPacketParser::SerialPacketParser() : buffer_index_(0), overflowed_(false) {}
+
+SerialPacketStatus SerialPacketParser::readPacket(Stream& serial_port, HILPacket& packet) {
+    while (serial_port.available() > 0) {
+        const int incoming = serial_port.read();
+        if (incoming < 0) {
+            continue;
+        }
+
+        if (incoming == '\r') {
+            continue;
+        }
+
+        if (incoming == '\n') {
+            if (overflowed_ || buffer_index_ == 0U) {
+                resetBuffer();
+                return SerialPacketStatus::InvalidPacket;
+            }
+
+            buffer_[buffer_index_] = '\0';
+            const bool parsed_ok = parseLine(buffer_, packet);
+            resetBuffer();
+            return parsed_ok ? SerialPacketStatus::PacketReady
+                             : SerialPacketStatus::InvalidPacket;
+        }
+
+        if (overflowed_) {
+            continue;
+        }
+
+        if (buffer_index_ >= (kBufferSize - 1U)) {
+            overflowed_ = true;
+            continue;
+        }
+
+        buffer_[buffer_index_++] = static_cast<char>(incoming);
+    }
+
+    return SerialPacketStatus::NoPacket;
+}
+
+bool SerialPacketParser::parseLine(char* line, HILPacket& packet) const {
     if (line == nullptr || *line == '\0') {
         return false;
     }
 
-    char buffer[128];
-    strncpy(buffer, line, sizeof(buffer) - 1U);
-    buffer[sizeof(buffer) - 1U] = '\0';
+    char* fields[kExpectedFieldCount] = {};
+    size_t field_count = 0;
+    fields[field_count++] = line;
 
-    char* token = strtok(buffer, ",");
+    for (char* cursor = line; *cursor != '\0'; ++cursor) {
+        if (*cursor != ',') {
+            continue;
+        }
 
-    if (!parseUnsignedLong(token, sample.timestamp_ms)) {
+        *cursor = '\0';
+        if (field_count >= kExpectedFieldCount) {
+            return false;
+        }
+
+        fields[field_count++] = cursor + 1;
+    }
+
+    if (field_count != kExpectedFieldCount) {
         return false;
     }
 
-    token = strtok(nullptr, ",");
-    if (!parseFloat(token, sample.pressure_pa)) {
-        return false;
+    for (size_t i = 0; i < field_count; ++i) {
+        if (fields[i] == nullptr || *fields[i] == '\0') {
+            return false;
+        }
     }
 
-    token = strtok(nullptr, ",");
-    if (!parseFloat(token, sample.temperature_c)) {
-        return false;
-    }
+    return parseUnsignedLong(fields[0], packet.timestamp_ms) &&
+           parseFloat(fields[1], packet.pressure_pa) &&
+           parseFloat(fields[2], packet.temperature_c) &&
+           parseFloat(fields[3], packet.accel_x_g) &&
+           parseFloat(fields[4], packet.accel_y_g) &&
+           parseFloat(fields[5], packet.accel_z_g) &&
+           parseFloat(fields[6], packet.gyro_x_dps) &&
+           parseFloat(fields[7], packet.gyro_y_dps) &&
+           parseFloat(fields[8], packet.gyro_z_dps);
+}
 
-    token = strtok(nullptr, ",");
-    if (!parseFloat(token, sample.accel_x_g)) {
-        return false;
-    }
-
-    token = strtok(nullptr, ",");
-    if (!parseFloat(token, sample.accel_y_g)) {
-        return false;
-    }
-
-    token = strtok(nullptr, ",");
-    if (!parseFloat(token, sample.accel_z_g)) {
-        return false;
-    }
-
-    token = strtok(nullptr, ",");
-    if (!parseFloat(token, sample.gyro_x_dps)) {
-        return false;
-    }
-
-    token = strtok(nullptr, ",");
-    if (!parseFloat(token, sample.gyro_y_dps)) {
-        return false;
-    }
-
-    token = strtok(nullptr, ",");
-    if (!parseFloat(token, sample.gyro_z_dps)) {
-        return false;
-    }
-
-    token = strtok(nullptr, ",");
-    if (token != nullptr) {
-        return false;
-    }
-
-    sample.altitude_m = 0.0f;
-    sample.rel_altitude_m = 0.0f;
-    return true;
+void SerialPacketParser::resetBuffer() {
+    buffer_index_ = 0;
+    overflowed_ = false;
+    buffer_[0] = '\0';
 }
 
 }  // namespace arfc

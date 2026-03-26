@@ -22,6 +22,11 @@ struct FlightSample {
 
     float accel_mag_g = 0.0f;
 
+    bool launch_flag = false;
+    bool apogee_flag = false;
+    bool descent_flag = false;
+    bool landing_flag = false;
+
     bool continuity_ch1 = false;
     bool continuity_ch2 = false;
     bool apogee_cmd = false;
@@ -30,4 +35,3 @@ struct FlightSample {
 };
 
 }  // namespace arfc
-

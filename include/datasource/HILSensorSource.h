@@ -5,6 +5,12 @@
 
 namespace arfc {
 
+enum class HILReadStatus : uint8_t {
+    NoData,
+    SampleReady,
+    InvalidPacket
+};
+
 class HILSensorSource : public IDataSource {
    public:
     explicit HILSensorSource(Stream& serial_port);
@@ -12,14 +18,16 @@ class HILSensorSource : public IDataSource {
     bool begin() override;
     bool readSample(FlightSample& sample) override;
     const char* name() const override;
+    HILReadStatus lastStatus() const;
 
    private:
-    static constexpr size_t kBufferSize = 128;
+    float pressureToAltitudeM(float pressure_pa) const;
 
     Stream& serial_port_;
     SerialPacketParser parser_;
-    char buffer_[kBufferSize] = {};
-    size_t buffer_index_;
+    bool altitude_baseline_initialized_;
+    float altitude_baseline_m_;
+    HILReadStatus last_status_;
 };
 
 }  // namespace arfc
